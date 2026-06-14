@@ -1,0 +1,10 @@
+{
+  "slug": "crc-quiz-duel",
+  "name": "CRC Quiz Duel",
+  "logo": "/app-logos/crc-quiz-duel.png",
+  "url": "https://YOUR-DEPLOYED-URL.vercel.app/",
+  "description": "Challenge a friend, stake CRC, the best quiz takes the pot. Settled directly via your trust graph.",
+  "tags": ["games", "social"],
+  "category": "garage",
+  "strongDisclaimer": true
+}
