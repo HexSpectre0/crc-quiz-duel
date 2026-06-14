@@ -7,17 +7,34 @@ export async function POST(req) {
   try {
     const { matchId, opponent } = await req.json();
     const match = await getMatch(matchId);
-    if (!match) return NextResponse.json({ error: 'Match introuvable' }, { status: 404 });
-    joinMatch(match, opponent);
-    await saveMatch(match);
+    if (!match) return NextResponse.json({ error: 'Match not found' }, { status: 404 });
+
+    const addr = (opponent || '').toLowerCase();
+    const isCreator = match.creator && match.creator.toLowerCase() === addr;
+    const isExistingOpponent = match.opponent && match.opponent.toLowerCase() === addr;
+    const isExistingPlayer = match.players && match.players[addr];
+
+    // If this address is ALREADY part of the match (creator, designated
+    // opponent, or already joined), don't try to join again — just return the
+    // questions so they can play. Only a brand-new second player calls joinMatch.
+    if (!isCreator && !isExistingOpponent && !isExistingPlayer) {
+      joinMatch(match, opponent); // throws if the match is already full with others
+      await saveMatch(match);
+    } else if (match.status === 'waiting' && isExistingOpponent) {
+      // designated opponent arriving for the first time → activate
+      match.status = 'active';
+      await saveMatch(match);
+    }
+
     const questions = getQuestionsForMatch(match).map(publicQuestion);
     return NextResponse.json({
       matchId: match.id,
       stake: match.stake,
       secondsPerQuestion: config.SECONDS_PER_QUESTION,
       questions,
+      role: isCreator ? 'creator' : 'opponent',
     });
   } catch (e) {
-    return NextResponse.json({ error: e.message }, { status: 500 });
+    return NextResponse.json({ error: e.message }, { status: 400 });
   }
 }

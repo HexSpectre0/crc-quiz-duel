@@ -88,3 +88,11 @@ input {
   background: #2a2410; color: #ffd98a; padding: 8px 16px;
   font-size: 12px; text-align: center; border-bottom: 1px solid var(--line);
 }
+
+.code-box {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 22px; font-weight: 700; letter-spacing: 2px;
+  text-align: center; background: var(--bg); color: #4ee0bb;
+  border: 1px dashed var(--green); border-radius: 10px;
+  padding: 16px; margin: 14px 0; user-select: all;
+}

@@ -11,7 +11,6 @@ import {
   getFriends,
   getRandomOpponent,
   settleLoss,
-  debugTrust,
 } from './circles.js';
 import { API_BASE, SECONDS_PER_QUESTION } from './constants.js';
 
@@ -71,8 +70,12 @@ async function renderHome() {
         <button id="random" class="btn btn-green">🎲 Random opponent (similar trust)</button>
         <div class="divider">…or challenge a friend:</div>
         <div id="friends"><p class="hint">Loading your trust graph…</p></div>
-        <button id="debug-trust" class="btn" style="background:#444;margin-top:14px;font-size:13px">🔍 Debug trust (temp)</button>
-        <pre id="debug-out" style="white-space:pre-wrap;font-size:11px;color:#9b8cff;background:#0f1020;border-radius:8px;padding:10px;margin-top:8px;display:none;overflow-x:auto"></pre>
+      </section>
+      <section class="card">
+        <h2>Join a duel</h2>
+        <p class="hint">Got a code from a friend? Enter it to join their duel.</p>
+        <input id="join-code" placeholder="Duel code" />
+        <button id="join-btn" class="btn">Join duel</button>
       </section>
     `}
     <section class="card">
@@ -125,17 +128,11 @@ async function renderHome() {
     } catch (e) { toast('Error: ' + e.message); }
   });
 
-  // Temporary debug button: shows what the trust read actually returns.
-  document.getElementById('debug-trust')?.addEventListener('click', async () => {
-    const out = document.getElementById('debug-out');
-    out.style.display = 'block';
-    out.textContent = 'Reading trust graph…';
-    try {
-      const report = await debugTrust(me);
-      out.textContent = JSON.stringify(report, (k, v) => (typeof v === 'bigint' ? v.toString() : v), 2);
-    } catch (e) {
-      out.textContent = 'debug error: ' + (e?.message || String(e));
-    }
+  // Join an existing duel by code (the opponent's path).
+  document.getElementById('join-btn')?.addEventListener('click', () => {
+    const code = document.getElementById('join-code')?.value.trim();
+    if (!code) return toast('Enter a duel code first.');
+    location.hash = `#/duel/${code}`;
   });
 }
 
@@ -158,10 +155,9 @@ async function renderDuel(matchId) {
     return;
   }
 
-  view.innerHTML = `<div class="card"><p class="hint">Joining duel…</p></div>`;
+  view.innerHTML = `<div class="card"><p class="hint">Loading duel…</p></div>`;
   let match;
   try {
-    // join is idempotent server-side; returns questions (without answers)
     match = await api('/api/match/join', {
       method: 'POST',
       body: JSON.stringify({ matchId, opponent: me }),
@@ -169,6 +165,32 @@ async function renderDuel(matchId) {
   } catch (e) {
     view.innerHTML = `<div class="card"><p class="hint">Couldn't join: ${esc(e.message)}</p></div>`;
     return;
+  }
+
+  // The creator first sees a share screen with the duel code, so the opponent
+  // can join with it. The opponent goes straight to the questions.
+  if (match.role === 'creator') {
+    const startedKey = `started:${matchId}`;
+    if (!sessionStorage.getItem(startedKey)) {
+      view.innerHTML = `
+        <div class="card">
+          <h2>Duel created 🎮</h2>
+          <p class="hint">Share this code with your opponent. They enter it on the
+          home screen to join. You both answer the same 5 questions; the higher
+          score wins the pot.</p>
+          <div class="code-box" id="code">${esc(matchId)}</div>
+          <button id="copy" class="btn" style="background:#444">Copy code</button>
+          <button id="start" class="btn">Start playing →</button>
+        </div>`;
+      document.getElementById('copy').addEventListener('click', () => {
+        navigator.clipboard?.writeText(matchId).then(() => toast('Code copied!'), () => {});
+      });
+      document.getElementById('start').addEventListener('click', () => {
+        sessionStorage.setItem(startedKey, '1');
+        playQuestions(matchId, match.questions, match.secondsPerQuestion || SECONDS_PER_QUESTION);
+      });
+      return;
+    }
   }
 
   await playQuestions(matchId, match.questions, match.secondsPerQuestion || SECONDS_PER_QUESTION);

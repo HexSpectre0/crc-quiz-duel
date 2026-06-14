@@ -8,8 +8,8 @@ Two separate Vercel projects: the **backend** (Next.js API) and the
 1. Sign up at https://upstash.com (free tier is plenty).
 2. Create a Redis database (any region; pick one near your users).
 3. Open the database → **REST API** section → copy:
-   - UPSTASH_REDIS_REST_URL="https://fast-mullet-123199.upstash.io"
-   - UPSTASH_REDIS_REST_TOKEN="gQAAAAAAAeE_AAIgcDIzNDA3NmJhMWM3Yzc0MjIzODMzZjY2ZWFjOTE4MDk4OQ"
+   - `UPSTASH_REDIS_REST_URL`
+   - `UPSTASH_REDIS_REST_TOKEN`
 
 ## 2. Deploy the backend (API)
 
