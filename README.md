@@ -1,111 +1,105 @@
-# ⚔️ CRC Quiz Duel — Circles Mini App
+# ⚔️ CRC Quiz Duel
 
-Asynchronous 1v1 quiz duel where both players stake CRC. Best score takes the
-pot. Native Circles settlement: no escrow — the loser sends their personal CRC
-directly to the winner via Hub V2.
+**Challenge a friend, stake your CRC, the best quiz takes the pot.**
+A 1v1 quiz duel built as a Circles Mini App — matched through your trust graph
+and settled natively in CRC, with no escrow and no middleman.
 
-Built as a **Vite + vanilla JS** mini app (modeled on the official Circles
-Jukebox example) + a small **Next.js backend** for match state and server-side
-scoring/anti-cheat.
+🎮 **Play now (Circles Playground):**
+https://circles.gnosis.io/playground?url=https%3A%2F%2Fcrc-quiz-duel-mjo5.vercel.app%2F
 
-## Architecture
+🤖 **No second player? Tap "Practice vs bot"** to see the whole flow solo
+(quiz → scoring → result → settlement).
+
+---
+
+## Why it fits Circles
+
+Circles is money issued by people, backed by trust. CRC Quiz Duel turns that
+trust into the core game mechanic:
+
+- **Trust as matchmaking.** You only duel people in your trust graph. The app
+  reads your aggregated trust relations and ranks **mutual trust** highest — a
+  two-way link is what makes a stake safe to settle.
+- **Trust as settlement.** No escrow contract. When a duel ends, the **loser
+  sends their personal CRC directly to the winner** via a native Hub V2
+  transfer — the social link is the guarantee. "Money issued by people," played.
+- **Debts are honoured socially.** Lose and you owe: a blocking banner stops you
+  starting new duels until you've paid your opponent. The trust graph keeps the
+  game honest.
+- **Built-in invite loop.** "Challenge a friend" pulls people into Circles — to
+  play, a friend needs a wallet, i.e. a new wallet in the ecosystem.
+
+A non-crypto person understands a quiz instantly; the challenge → result →
+rematch loop brings them back, and every duel exercises real Circles primitives.
+
+## How it works
+
+1. Open inside the Circles wallet — your address connects automatically.
+2. Set a stake (CRC) and pick an opponent: a friend from your trust graph, a
+   random opponent of similar trust, or the practice bot.
+3. For a friend duel you get a short **code** to share; they join with it. Both
+   answer the **same 5 questions** (4-choice, 15s each), frozen at creation so
+   it's fair.
+4. Higher score wins (ties broken by speed). The **loser signs a CRC transfer**
+   to the winner in their wallet. Until they pay, they can't start a new duel.
+5. Reconnect any time: your active duels and any unsettled debt are shown on the
+   home screen.
+
+---
+
+## Technical overview
+
+**Vite + vanilla JS** mini app (front) + a small **Next.js API** (match state,
+server-side scoring), modeled on the official Circles Jukebox example.
 
 ```
-crc-quiz-duel-vite/
-├── index.html            mini app shell
-├── src/
-│   ├── main.js           UI + routing (#/ and #/duel/<id>), wallet, settlement
-│   ├── circles.js        miniapp-sdk wiring: onWalletChange, sendTransactions,
-│   │                     trust/profile reads, settleLoss()
-│   ├── game.js           pure scoring helpers (client copy)
-│   ├── constants.js      Hub V2 address, RPCs, API base, config
-│   ├── questions.json    111 international MCQ questions
+├── index.html / src/
+│   ├── main.js        UI, routing, wallet, duels list, debt banner, settlement
+│   ├── circles.js     miniapp-sdk: onWalletChange, sendTransactions,
+│   │                  trust reads (getAggregatedTrustRelations), settleLoss()
+│   ├── game.js        client-side scoring helpers
+│   ├── constants.js   Hub V2 address, RPCs, config
+│   ├── questions.json 100+ international MCQ questions
 │   └── style.css
-└── backend/              Next.js — API only (match state + scoring)
+└── backend/           Next.js — API only
     ├── app/api/match/{create,join,answer,state,settle}/route.js
+    ├── app/api/player/duels/route.js     active duels + unsettled debts
     ├── app/api/leaderboard/route.js
-    ├── lib/{game.js,store.js}
-    └── middleware.js     CORS so the Vite frontend can call the API
+    ├── lib/{game.js,store.js}            store: Upstash Redis + mem fallback
+    └── middleware.js                     CORS
 ```
 
-**Why two pieces.** The mini app runs inside the Circles wallet (Metri) and
-handles wallet + signing via `@aboutcircles/miniapp-sdk`. Match state, the
-correct answers, and scoring live in the backend so answers never leak to the
-client and a player can't replay or peek (server-side anti-cheat). The frontend
-only ever sees questions *without* answers.
+### Circles integration
 
-## How the wallet + settlement work (confirmed against the Jukebox example)
+- **Wallet** via `@aboutcircles/miniapp-sdk`: `onWalletChange` (connect),
+  `sendTransactions` (atomic Safe bundle) — embedded host bridge.
+- **Reads** via `@aboutcircles/sdk`: aggregated trust relations, profiles.
+- **Settlement**: native Hub V2 ERC-1155
+  `safeTransferFrom(loser, winner, tokenId, amount, "0x")`, encoded with
+  `hubV2Abi`. Personal CRC → `tokenId = uint256(loser address)`, 1 CRC = 1e18 wei.
+- Gnosis Chain (100), `viem`, lazy SDK construction, hex tx fields. Conforms to
+  the Garage transaction policy (no `execTransaction`, never targets the user's
+  own Safe — settlement is always loser → winner, two distinct addresses).
 
-- Connect: `onWalletChange(cb)` → gives the connected address (or null).
-- Settlement: `sendTransactions([{ to, data, value }])` bundles into one atomic
-  Safe tx and returns tx hashes.
-- The transfer is a native Hub V2 ERC-1155 `safeTransferFrom(from, to, tokenId,
-  amount, "0x")`, encoded with `hubV2Abi` from `@aboutcircles/sdk-abis`.
-- **Personal CRC**: `tokenId = BigInt(payerAddress)` (a personal-CRC token id is
-  just the avatar address as a uint256). 1 CRC = 1e18 wei at par.
+### Anti-cheat
 
-So when a duel ends, the **loser** taps "Pay X CRC to the winner" and their
-wallet signs a `safeTransferFrom` of their personal CRC to the winner's address.
+Questions are frozen per match (seed) and served **without** the answer key.
+Scoring is **server-side**; the client never receives correct answers. One
+answer per question (replay protection); scores hidden until both finish.
 
-## Running locally (two servers)
+## Run locally
 
-Terminal 1 — backend (port 4000):
 ```bash
-cd backend
-npm install
-npm run dev
+cd backend && npm install && npm run dev   # port 4000, set UPSTASH_REDIS_REST_URL/TOKEN
+npm install && npm run dev                  # port 3000, set VITE_API_BASE to the backend
 ```
 
-Terminal 2 — frontend (port 3000):
-```bash
-npm install
-npm run dev        # vite --host, LAN-accessible
-```
+Deployed on Vercel (frontend at repo root, backend in `backend/`). The mini app
+connects a wallet only inside the Circles host; in a plain browser it shows a
+"standalone mode" notice — expected.
 
-The frontend calls the backend at `http://localhost:4000` by default
-(`VITE_API_BASE` to override). CORS is handled by `backend/middleware.js`.
+## Roadmap
 
-### Testing inside the Circles wallet
-
-The mini app needs the wallet host to connect (`onWalletChange`). Outside it,
-you'll see a "Standalone mode" banner and can browse the UI but not sign.
-For a real test, run it as a mini app inside Metri / Gnosis App (embedded host),
-or deploy and submit via Circles Garage (external deployments are supported).
-
-## ⚠️ Must-fix before a public demo
-
-1. **Persistent store.** `backend/lib/store.js` is in-memory. On serverless
-   (Vercel) this won't survive between requests, and the duel is async (players
-   return at different times) — so you NEED a shared store. Swap to **Upstash
-   Redis** (free), keeping the same function names (`saveMatch`, `getMatch`,
-   `getRep`, `recordResult`, `markSettled`, `leaderboard`).
-2. **Trust read (verified).** `circles.js → getFriends()` uses
-   `avatar.trust.getAll()`, reading the `relation` field
-   ('trusts' | 'trustedBy' | 'mutuallyTrusts'). Matchmaking ranks
-   `mutuallyTrusts` highest (two-way link = guaranteed settlement).
-3. **Settlement verification.** `/api/match/settle` currently trusts the
-   client's txHash. For production, verify the on-chain TransferSingle (correct
-   from/to/amount) before clearing the unsettled flag.
-4. **Mini app manifest.** To list in the store, add the entry in the Circles
-   mini apps registry (`static/miniapps.json` in their repo) or follow the
-   external-deployment path from Circles Garage.
-
-## Anti-cheat (how it's enforced)
-
-- Questions are frozen per match (seed) and served WITHOUT `answerIndex`.
-- Answers are scored **server-side** (`/api/match/answer`); the client never
-  receives the correct option.
-- Replay protection: each question can be answered once; scores stay hidden
-  until both players finish (`/api/match/state` masks scores while active).
-
-## Game config
-
-5 questions per duel, 4-choice MCQ, 15s timer (`src/constants.js`).
-111 questions across Geography, Science, History, Sports, Math, Tech, Crypto,
-Culture, Nature, Food, Human Body.
-
-## Next steps (for progress notes)
-
-- Week 5: **Flappy duel** — same match/settlement engine, swap quiz for a
-  high-score mini-game.
-- Streaks, one-tap rematch, weekly ladder aligned with Garage cycles.
+- **Flappy duel** — same match + settlement engine, swap the quiz for a
+  high-score arcade game.
+- One-tap rematch, streaks, and a weekly ladder aligned with Garage cycles.
