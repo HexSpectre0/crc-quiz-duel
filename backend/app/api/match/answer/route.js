@@ -13,8 +13,15 @@ export async function POST(req) {
 
     const res = submitAnswer(match, address, Number(qIndex), Number(choiceIndex), Number(ms));
 
-    // si le match vient de se terminer, on enregistre le resultat (reputation)
-    if (match.status === 'finished' && match.result && !match.result._recorded) {
+    // When the match just finished, record the result (reputation + debt) —
+    // but NEVER for practice matches (the bot must not enter the leaderboard
+    // and no real debt is created against a bot).
+    if (
+      match.status === 'finished' &&
+      match.result &&
+      !match.result._recorded &&
+      match.mode !== 'practice'
+    ) {
       await recordResult({ winner: match.result.winner, loser: match.result.loser, stake: match.stake });
       match.result._recorded = true;
     }
