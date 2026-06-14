@@ -47,37 +47,80 @@ export async function getProfile(address) {
 // Trust graph -> friends list for matchmaking. We only match players linked in
 // the trust graph (the social link is what guarantees settlement).
 //
-// Uses the official trust read: avatar.trust.getAll() returns aggregated
-// relations, each with a `relation` field: 'trusts' | 'trustedBy' |
-// 'mutuallyTrusts' | 'selfTrusts', plus subjectAvatar (me) and objectAvatar
-// (the other person). We surface everyone with a trust link, ranking mutual
-// trust highest (best settlement guarantee).
-export async function getFriends(address) {
+// Tries the known trust-read methods in order, since the exact method name
+// varies by SDK surface: avatar.trust.getAll(), then RPC fallbacks. Each
+// relation has a `relation` field ('trusts' | 'trustedBy' | 'mutuallyTrusts'
+// | 'selfTrusts') and subject/object avatars.
+async function fetchTrustRelations(address) {
   const sdk = getReadSdk();
-  const me = getAddress(address).toLowerCase();
+  const addr = getAddress(address);
 
-  let relations = [];
+  // 1) avatar.trust.getAll()
   try {
-    const avatar = await sdk.getAvatar(getAddress(address));
-    relations = await avatar.trust.getAll();
+    const avatar = await sdk.getAvatar(addr);
+    if (avatar?.trust?.getAll) {
+      const rel = await avatar.trust.getAll();
+      if (rel) return { rel, via: 'avatar.trust.getAll' };
+    }
   } catch (e) {
-    console.warn('[circles] trust lookup failed:', e);
-    return [];
+    console.warn('[trust] avatar.trust.getAll failed:', e);
   }
 
+  // 2) sdk.data.getAggregatedTrustRelations(addr)
+  try {
+    if (sdk.data?.getAggregatedTrustRelations) {
+      const rel = await sdk.data.getAggregatedTrustRelations(addr);
+      if (rel) return { rel, via: 'data.getAggregatedTrustRelations' };
+    }
+  } catch (e) {
+    console.warn('[trust] data.getAggregatedTrustRelations failed:', e);
+  }
+
+  // 3) sdk.rpc.* variants
+  try {
+    const fn = sdk.rpc?.trust?.getAggregatedTrustRelations || sdk.rpc?.getAggregatedTrustRelations;
+    if (fn) {
+      const rel = await fn.call(sdk.rpc.trust || sdk.rpc, addr);
+      if (rel) return { rel, via: 'rpc.getAggregatedTrustRelations' };
+    }
+  } catch (e) {
+    console.warn('[trust] rpc.getAggregatedTrustRelations failed:', e);
+  }
+
+  return { rel: [], via: 'none' };
+}
+
+export async function getFriends(address) {
+  const me = getAddress(address).toLowerCase();
+  const { rel } = await fetchTrustRelations(address);
+
   const friends = [];
-  for (const r of relations || []) {
+  for (const r of rel || []) {
     const relation = r.relation;
-    if (relation === 'selfTrusts') continue; // skip self
-    const other = String(r.objectAvatar || '').toLowerCase();
+    if (relation === 'selfTrusts') continue;
+    // try several field names defensively (subject/object or trustee/truster)
+    const other = String(r.objectAvatar || r.trustee || r.truster || r.address || '').toLowerCase();
     if (!other || other === me) continue;
     const mutual = relation === 'mutuallyTrusts';
     friends.push({ address: other, mutual, relation, trustLevel: mutual ? 2 : 1 });
   }
-
-  // mutual trust first (settlement guaranteed by the two-way social link)
   friends.sort((a, b) => b.trustLevel - a.trustLevel);
   return friends;
+}
+
+// Temporary diagnostic: returns a human-readable report of what the trust read
+// actually returned, so we can debug from the phone (no console needed).
+export async function debugTrust(address) {
+  try {
+    const { rel, via } = await fetchTrustRelations(address);
+    return {
+      via,
+      count: Array.isArray(rel) ? rel.length : 'not-array',
+      sample: Array.isArray(rel) ? rel.slice(0, 3) : rel,
+    };
+  } catch (e) {
+    return { error: e?.message || String(e) };
+  }
 }
 
 export async function getRandomOpponent(address) {

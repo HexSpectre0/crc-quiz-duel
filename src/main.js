@@ -11,6 +11,7 @@ import {
   getFriends,
   getRandomOpponent,
   settleLoss,
+  debugTrust,
 } from './circles.js';
 import { API_BASE, SECONDS_PER_QUESTION } from './constants.js';
 
@@ -70,6 +71,8 @@ async function renderHome() {
         <button id="random" class="btn btn-green">🎲 Random opponent (similar trust)</button>
         <div class="divider">…or challenge a friend:</div>
         <div id="friends"><p class="hint">Loading your trust graph…</p></div>
+        <button id="debug-trust" class="btn" style="background:#444;margin-top:14px;font-size:13px">🔍 Debug trust (temp)</button>
+        <pre id="debug-out" style="white-space:pre-wrap;font-size:11px;color:#9b8cff;background:#0f1020;border-radius:8px;padding:10px;margin-top:8px;display:none;overflow-x:auto"></pre>
       </section>
     `}
     <section class="card">
@@ -120,6 +123,19 @@ async function renderHome() {
       if (!opp) return toast('No one in your trust graph yet. Invite a friend!');
       createDuel(opp.address);
     } catch (e) { toast('Error: ' + e.message); }
+  });
+
+  // Temporary debug button: shows what the trust read actually returns.
+  document.getElementById('debug-trust')?.addEventListener('click', async () => {
+    const out = document.getElementById('debug-out');
+    out.style.display = 'block';
+    out.textContent = 'Reading trust graph…';
+    try {
+      const report = await debugTrust(me);
+      out.textContent = JSON.stringify(report, (k, v) => (typeof v === 'bigint' ? v.toString() : v), 2);
+    } catch (e) {
+      out.textContent = 'debug error: ' + (e?.message || String(e));
+    }
   });
 }
 
