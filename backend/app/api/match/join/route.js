@@ -26,13 +26,22 @@ export async function POST(req) {
       await saveMatch(match);
     }
 
+    const me = match.players[addr];
+    const answeredCount = me ? me.answers.length : 0;
+    const youFinished = me ? !!me.finished : false;
+
     const questions = getQuestionsForMatch(match).map(publicQuestion);
     return NextResponse.json({
       matchId: match.id,
       stake: match.stake,
+      mode: match.mode,
+      status: match.status,
       secondsPerQuestion: config.SECONDS_PER_QUESTION,
       questions,
       role: isCreator ? 'creator' : 'opponent',
+      answeredCount,   // how many questions you've already answered
+      youFinished,     // you've answered all your questions
+      result: match.status === 'finished' ? match.result : null,
     });
   } catch (e) {
     return NextResponse.json({ error: e.message }, { status: 400 });

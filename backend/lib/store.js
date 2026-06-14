@@ -35,13 +35,26 @@ async function redis(command) {
 // ─── In-memory fallback ─────────────────────────────────────
 const memMatches = new Map();
 const memRep = new Map();
+const memPlayerMatches = new Map(); // address -> Set<matchId>
 
 // ─── Matches ────────────────────────────────────────────────
+const PLAYER_MATCHES_PREFIX = 'player_matches:'; // set of match ids per address
+
 export async function saveMatch(match) {
   if (useRedis) {
     await redis(['SET', MATCH_PREFIX + match.id, JSON.stringify(match)]);
+    // index this match under each human player so we can list a player's duels
+    for (const addr of Object.keys(match.players || {})) {
+      if (match.players[addr]?.isBot) continue;
+      await redis(['SADD', PLAYER_MATCHES_PREFIX + addr, match.id]);
+    }
   } else {
     memMatches.set(match.id, match);
+    for (const addr of Object.keys(match.players || {})) {
+      if (match.players[addr]?.isBot) continue;
+      if (!memPlayerMatches.has(addr)) memPlayerMatches.set(addr, new Set());
+      memPlayerMatches.get(addr).add(match.id);
+    }
   }
   return match;
 }
@@ -52,6 +65,25 @@ export async function getMatch(id) {
     return raw ? JSON.parse(raw) : null;
   }
   return memMatches.get(id) || null;
+}
+
+// All matches a player is part of (newest first). Powers the "your duels" list
+// and the unsettled-debt banner.
+export async function getMatchesForPlayer(address) {
+  const a = address.toLowerCase();
+  let ids = [];
+  if (useRedis) {
+    ids = (await redis(['SMEMBERS', PLAYER_MATCHES_PREFIX + a])) || [];
+  } else {
+    ids = Array.from(memPlayerMatches.get(a) || []);
+  }
+  const matches = [];
+  for (const id of ids) {
+    const m = await getMatch(id);
+    if (m) matches.push(m);
+  }
+  matches.sort((x, y) => (y.createdAt || 0) - (x.createdAt || 0));
+  return matches;
 }
 
 // ─── Reputation ─────────────────────────────────────────────

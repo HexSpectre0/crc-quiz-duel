@@ -102,3 +102,19 @@ input {
   border: 1px solid rgba(225, 163, 59, 0.4); border-radius: 8px;
   padding: 8px 12px; font-size: 13px; margin-bottom: 14px; text-align: center;
 }
+
+.debt-card {
+  border: 1px solid rgba(255, 123, 123, 0.5);
+  background: rgba(255, 123, 123, 0.1);
+}
+.debt-card h2 { color: #ff9b9b; }
+.debt-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 8px 0; font-size: 14px; gap: 10px;
+}
+.duel-row {
+  display: flex; justify-content: space-between; align-items: center; width: 100%;
+  background: var(--bg); color: var(--ink); border: 1px solid var(--line);
+  padding: 12px; border-radius: 10px; margin-bottom: 8px; cursor: pointer; font-size: 14px;
+}
+.duel-state { font-size: 12px; color: #9b8cff; }

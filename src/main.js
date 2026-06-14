@@ -61,11 +61,13 @@ async function renderHome() {
   view.innerHTML = `
     <p class="tagline">Challenge a friend, stake your CRC, the best quiz takes the pot.</p>
     ${!me ? `<p class="hint">Open this inside the Circles wallet to connect and play.</p>` : `
-      <section class="card">
+      <div id="debt-zone"></div>
+      <div id="active-zone"></div>
+      <section class="card" id="new-duel-section">
         <label>Stake (CRC)</label>
         <input id="stake" type="number" min="1" value="10" />
       </section>
-      <section class="card">
+      <section class="card" id="opponent-section">
         <h2>Pick an opponent</h2>
         <button id="practice" class="btn" style="background:#e1a33b">🤖 Practice vs bot (try it solo)</button>
         <button id="random" class="btn btn-green" style="margin-top:8px">🎲 Random opponent (similar trust)</button>
@@ -98,6 +100,9 @@ async function renderHome() {
   }).catch(() => {});
 
   if (!me) return;
+
+  // Load the player's duels + debts. Unsettled debts BLOCK starting new duels.
+  loadPlayerDuels();
 
   // friends list
   getFriends(me).then((friends) => {
@@ -139,6 +144,67 @@ async function renderHome() {
   });
 }
 
+async function loadPlayerDuels() {
+  let data;
+  try {
+    data = await api(`/api/player/duels?address=${me}`);
+  } catch { return; }
+
+  const debtZone = document.getElementById('debt-zone');
+  const activeZone = document.getElementById('active-zone');
+  const opponentSection = document.getElementById('opponent-section');
+
+  // ── Blocking debt banner ──
+  if (data.debts && data.debts.length > 0) {
+    const totalDebt = data.debts.reduce((s, d) => s + d.stake, 0);
+    debtZone.innerHTML = `
+      <section class="card debt-card">
+        <h2>⚠️ Unsettled debt</h2>
+        <p>You lost ${data.debts.length} duel${data.debts.length > 1 ? 's' : ''} and owe
+        <b>${totalDebt} CRC</b>. Settle to keep playing — you can't start a new duel
+        until your debts are paid.</p>
+        ${data.debts.map((d) => `
+          <div class="debt-row">
+            <span>Owe ${d.stake} CRC to ${short(d.winner)}</span>
+            <button class="btn pay-debt" data-id="${d.matchId}" style="width:auto;margin:0;padding:8px 14px">Pay now</button>
+          </div>`).join('')}
+      </section>`;
+    // Disable new-duel actions while in debt
+    opponentSection?.querySelectorAll('button').forEach((b) => { b.disabled = true; });
+    if (opponentSection) opponentSection.style.opacity = '0.5';
+
+    debtZone.querySelectorAll('.pay-debt').forEach((b) =>
+      b.addEventListener('click', () => { location.hash = `#/duel/${b.dataset.id}`; })
+    );
+  } else {
+    debtZone.innerHTML = '';
+  }
+
+  // ── Active duels list ──
+  if (data.active && data.active.length > 0) {
+    activeZone.innerHTML = `
+      <section class="card">
+        <h2>🎯 Your duels</h2>
+        ${data.active.map((a) => {
+          const label = a.yourTurn
+            ? '▶️ Your turn'
+            : a.waitingForOpponent
+              ? '⏳ Waiting for opponent'
+              : 'In progress';
+          return `<button class="duel-row" data-id="${a.matchId}">
+            <span>${a.stake} CRC · ${esc(a.mode || 'duel')}</span>
+            <span class="duel-state">${label}</span>
+          </button>`;
+        }).join('')}
+      </section>`;
+    activeZone.querySelectorAll('.duel-row').forEach((b) =>
+      b.addEventListener('click', () => { location.hash = `#/duel/${b.dataset.id}`; })
+    );
+  } else {
+    activeZone.innerHTML = '';
+  }
+}
+
 async function createDuel(opponent, practice = false) {
   const stake = Number(document.getElementById('stake')?.value || 10);
   try {
@@ -173,10 +239,27 @@ async function renderDuel(matchId) {
 
   const isPractice = sessionStorage.getItem(`practice:${matchId}`) === '1' || match.mode === 'practice';
 
+  // If the match is already finished, go straight to the result.
+  if (match.status === 'finished' && match.result) {
+    return renderResult(matchId, {
+      result: match.result,
+      stake: match.stake,
+      mode: match.mode,
+    });
+  }
+
+  // If YOU already answered all your questions, don't replay — wait for the
+  // opponent. (This is the bug fix: re-entering a duel no longer says
+  // "player already finished".)
+  if (match.youFinished) {
+    return waitForOpponent(matchId);
+  }
+
   // The creator first sees a share screen with the duel code, so the opponent
   // can join with it. The opponent goes straight to the questions.
   // In practice mode there's no human to invite → skip straight to the quiz.
-  if (match.role === 'creator' && !isPractice) {
+  // Only show the share screen if the creator hasn't started answering yet.
+  if (match.role === 'creator' && !isPractice && match.answeredCount === 0) {
     const startedKey = `started:${matchId}`;
     if (!sessionStorage.getItem(startedKey)) {
       view.innerHTML = `
@@ -194,17 +277,18 @@ async function renderDuel(matchId) {
       });
       document.getElementById('start').addEventListener('click', () => {
         sessionStorage.setItem(startedKey, '1');
-        playQuestions(matchId, match.questions, match.secondsPerQuestion || SECONDS_PER_QUESTION);
+        playQuestions(matchId, match.questions, match.secondsPerQuestion || SECONDS_PER_QUESTION, match.answeredCount || 0);
       });
       return;
     }
   }
 
-  await playQuestions(matchId, match.questions, match.secondsPerQuestion || SECONDS_PER_QUESTION);
+  // Resume at the next unanswered question (answeredCount), not from 0.
+  await playQuestions(matchId, match.questions, match.secondsPerQuestion || SECONDS_PER_QUESTION, match.answeredCount || 0);
 }
 
-async function playQuestions(matchId, questions, secs) {
-  let qIndex = 0;
+async function playQuestions(matchId, questions, secs, startIndex = 0) {
+  let qIndex = startIndex;
 
   const showQuestion = () => {
     if (qIndex >= questions.length) return waitForOpponent(matchId);
