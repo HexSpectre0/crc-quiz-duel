@@ -71,6 +71,40 @@ function emptyPlayer(address) {
   };
 }
 
+// Practice mode: a duel against a server "bot" opponent that has already
+// finished with a simulated score. When the real player finishes their 5
+// questions, maybeFinish() compares against the bot and resolves a winner —
+// so the full result screen works with a single human. The settlement is
+// SIMULATED client-side (clearly labelled), since you can't send CRC to a bot.
+const BOT_ADDRESS = '0x0000000000000000000000000000000000000B07'; // sentinel "bot"
+
+export function newPracticeMatch({ id, creator, stake }) {
+  const match = newMatch({ id, creator, stake, opponent: BOT_ADDRESS, mode: 'practice' });
+  // Give the bot a finished, plausible score: 2–4 correct out of 5, with
+  // mid-range speed. Stored as a finished player so maybeFinish can resolve.
+  const correctCount = 2 + Math.floor(Math.random() * 3); // 2..4
+  let score = 0;
+  const answers = [];
+  for (let i = 0; i < QUESTIONS_PER_DUEL; i++) {
+    const isCorrect = i < correctCount;
+    const ms = 4000 + Math.floor(Math.random() * 6000); // 4–10s
+    const points = isCorrect ? 100 + Math.max(0, Math.round(50 * (1 - ms / (SECONDS_PER_QUESTION * 1000)))) : 0;
+    score += points;
+    answers.push({ qIndex: i, choiceIndex: -1, correct: isCorrect, ms, points });
+  }
+  match.players[BOT_ADDRESS.toLowerCase()] = {
+    address: BOT_ADDRESS.toLowerCase(),
+    answers,
+    score,
+    finished: true,
+    isBot: true,
+  };
+  match.status = 'active';
+  return match;
+}
+
+export const BOT = BOT_ADDRESS;
+
 export function getQuestionsForMatch(match) {
   // reconstruit les objets complets a partir des ids figes
   return match.questionIds.map((id) => ALL.find((q) => q.id === id));

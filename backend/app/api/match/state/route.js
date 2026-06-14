@@ -21,6 +21,7 @@ export async function GET(req) {
   return NextResponse.json({
     matchId: match.id,
     status: match.status,
+    mode: match.mode,
     stake: match.stake,
     players,
     result: match.status === 'finished' ? match.result : null,

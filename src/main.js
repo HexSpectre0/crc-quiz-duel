@@ -67,7 +67,8 @@ async function renderHome() {
       </section>
       <section class="card">
         <h2>Pick an opponent</h2>
-        <button id="random" class="btn btn-green">🎲 Random opponent (similar trust)</button>
+        <button id="practice" class="btn" style="background:#e1a33b">🤖 Practice vs bot (try it solo)</button>
+        <button id="random" class="btn btn-green" style="margin-top:8px">🎲 Random opponent (similar trust)</button>
         <div class="divider">…or challenge a friend:</div>
         <div id="friends"><p class="hint">Loading your trust graph…</p></div>
       </section>
@@ -120,6 +121,8 @@ async function renderHome() {
     if (el) el.innerHTML = `<p class="hint">Couldn't load trust graph: ${esc(e.message)}</p>`;
   });
 
+  document.getElementById('practice')?.addEventListener('click', () => createDuel(null, true));
+
   document.getElementById('random')?.addEventListener('click', async () => {
     try {
       const opp = await getRandomOpponent(me);
@@ -136,13 +139,14 @@ async function renderHome() {
   });
 }
 
-async function createDuel(opponent) {
+async function createDuel(opponent, practice = false) {
   const stake = Number(document.getElementById('stake')?.value || 10);
   try {
     const data = await api('/api/match/create', {
       method: 'POST',
-      body: JSON.stringify({ creator: me, stake, opponent, mode: 'friend' }),
+      body: JSON.stringify({ creator: me, stake, opponent, practice, mode: practice ? 'practice' : 'friend' }),
     });
+    if (practice) sessionStorage.setItem(`practice:${data.matchId}`, '1');
     location.hash = `#/duel/${data.matchId}`;
   } catch (e) { toast('Error: ' + e.message); }
 }
@@ -167,9 +171,12 @@ async function renderDuel(matchId) {
     return;
   }
 
+  const isPractice = sessionStorage.getItem(`practice:${matchId}`) === '1' || match.mode === 'practice';
+
   // The creator first sees a share screen with the duel code, so the opponent
   // can join with it. The opponent goes straight to the questions.
-  if (match.role === 'creator') {
+  // In practice mode there's no human to invite → skip straight to the quiz.
+  if (match.role === 'creator' && !isPractice) {
     const startedKey = `started:${matchId}`;
     if (!sessionStorage.getItem(startedKey)) {
       view.innerHTML = `
@@ -273,14 +280,18 @@ function waitForOpponent(matchId) {
 function renderResult(matchId, state) {
   const iWon = state.result.winner.toLowerCase() === me.toLowerCase();
   const stake = state.stake;
+  const isPractice = sessionStorage.getItem(`practice:${matchId}`) === '1' || state.mode === 'practice';
 
   view.innerHTML = `
     <div class="card result">
+      ${isPractice ? `<div class="practice-banner">🤖 Practice mode — no real CRC moved</div>` : ''}
       <h1>${iWon ? '🎉 You won!' : '😤 You lost'}</h1>
       <p>Pot: <b>${stake} CRC</b></p>
       ${iWon
-        ? `<p class="hint">Your opponent will send you the stake. It'll show up in your wallet.</p>`
-        : `<button id="settle" class="btn">Pay ${stake} CRC to the winner</button>`}
+        ? `<p class="hint">${isPractice
+              ? 'In a real duel, your opponent would send you the stake here.'
+              : "Your opponent will send you the stake. It'll show up in your wallet."}</p>`
+        : `<button id="settle" class="btn">${isPractice ? `Simulate paying ${stake} CRC` : `Pay ${stake} CRC to the winner`}</button>`}
       <p id="settle-status" class="hint"></p>
       <a href="#/" class="link">← New duel</a>
     </div>
@@ -291,10 +302,18 @@ function renderResult(matchId, state) {
       const status = document.getElementById('settle-status');
       const btn = document.getElementById('settle');
       btn.disabled = true;
+
+      // Practice: simulate the settlement (you can't send CRC to a bot, and
+      // never to yourself). Clearly labelled so it's not misleading.
+      if (isPractice) {
+        status.textContent = 'Simulating transfer…';
+        setTimeout(() => { status.textContent = '✅ (Simulated) Stake would be sent to the winner. In a real duel this is an on-chain CRC transfer.'; }, 800);
+        return;
+      }
+
       status.textContent = 'Confirm the transaction in your wallet…';
       try {
         const hash = await settleLoss(me, state.result.winner, stake);
-        // tell backend it's settled (clears the "unsettled" flag)
         try {
           await api('/api/match/settle', {
             method: 'POST',
